@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,11 +31,105 @@ type AvailableReleaseResponse struct {
 
 func main() {
 
-	if len(os.Args) == 1 {
+	if !isHipoExists() {
 		InitHipo()
+	}
+
+	if len(os.Args) == 1 {
+		fmt.Printf("Usage:\nhipo group:artifact:version\n")
 	} else if len(os.Args) == 2 {
 		destPath := downloadFile(os.Args[1])
 		executeFile(destPath)
+	}
+
+}
+
+func isHipoExists() bool {
+
+	homeDir, err := os.UserHomeDir()
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	var javaDir = filepath.Join(homeDir, ".hipo", "jre")
+
+	if _, err := os.Stat(javaDir); os.IsNotExist(err) {
+		return false
+	}
+
+	_, found := findJava(javaDir)
+
+	return found
+
+}
+
+func findJava(javaDir string) (string, bool) {
+
+	entries, err := os.ReadDir(javaDir)
+	if err != nil {
+		fmt.Println("Error reading jre directory:", err)
+		os.Exit(1)
+	}
+
+	//checks all files in the parent jre directory to find bin directory
+	for _, entry := range entries {
+
+		if entry.IsDir() {
+
+			binDir := filepath.Join(javaDir, entry.Name(), "bin")
+
+			if _, err := os.Stat(binDir); os.IsNotExist(err) {
+				continue
+			}
+
+			binEntries, err := os.ReadDir(binDir)
+
+			if err != nil {
+				fmt.Println("Error reading bin directory:", err)
+				os.Exit(1)
+			}
+
+			//checks all files in the bin directory to find java executable
+			for _, binEntry := range binEntries {
+
+				fileName := filepath.Join(binDir, binEntry.Name())
+
+				baseName := filepath.Base(fileName)
+
+				if baseName == "java" || baseName == "java.exe" {
+					return fileName, true
+				}
+			}
+
+		}
+	}
+
+	return "", false
+}
+
+func InitHipo() {
+
+	hipoHome, done := PrepareHipoHome()
+
+	if !done {
+		os.Exit(1)
+	}
+
+	mostRecentJavaRelease, done := GetLatestJavaRelease()
+
+	if !done {
+		os.Exit(1)
+	}
+
+	var arch = ArchitecturesMap[runtime.GOARCH]
+	var osName = runtime.GOOS
+
+	done = DownloadJava(mostRecentJavaRelease, osName, arch, hipoHome)
+
+	if !done {
+		os.Exit(1)
 	}
 }
 
@@ -44,7 +141,7 @@ func downloadFile(Args string) string {
 		return ""
 	}
 
-	// Go to link
+	// goes to link
 	groupID := parts[0]
 	artifactID := parts[1]
 	version := parts[2]
@@ -60,16 +157,6 @@ func downloadFile(Args string) string {
 		return ""
 	}
 
-	// Create directory to save the JAR file
-	destDir := filepath.Join(homeDir, ".hipo", groupPath, artifactID, version)
-	err2 := os.MkdirAll(destDir, 0755)
-	if err2 != nil {
-		fmt.Printf("Error creating directory: %v\n", err)
-		return ""
-	}
-
-	destPath := filepath.Join(destDir, artifactFilename)
-
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("failed to make GET request: %v", err)
@@ -82,6 +169,23 @@ func downloadFile(Args string) string {
 		return ""
 	}
 
+	destDir := filepath.Join(homeDir, ".hipo", groupPath, artifactID, version)
+
+	//copies the downloaded content into the new file in the destDir
+	return copyFile(destDir, artifactFilename, resp.Body)
+
+}
+
+func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) string {
+
+	err := os.MkdirAll(destDir, 0755)
+	if err != nil {
+		fmt.Printf("Error creating directory: %v\n", err)
+		return ""
+	}
+
+	destPath := filepath.Join(destDir, artifactFilename)
+
 	out, err := os.Create(destPath)
 	if err != nil {
 		fmt.Printf("failed to create file: %v", err)
@@ -89,13 +193,12 @@ func downloadFile(Args string) string {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
+	_, err = io.Copy(out, respBody)
 	if err != nil {
 		fmt.Printf("failed to copy response body to file: %v", err)
 		return ""
 	}
 
-	// fmt.Printf("Downloaded to %s\n", destPath)
 	return destPath
 }
 
@@ -110,23 +213,21 @@ func executeFile(jarFilePath string) {
 
 	jreParentDir := filepath.Join(homeDir, ".hipo", "jre")
 
-	// List the directories in the parent JRE directory
-	dirs, err := os.ReadDir(jreParentDir)
-	if err != nil {
-		fmt.Println("Error reading JRE directory:", err)
-		return
-	}
-
-	if len(dirs) == 0 {
-		fmt.Println("No JDK directories found")
-		return
-	}
-
-	// Assume there is only one directory and get its name
-	jdkDir := dirs[0].Name()
-
 	// Path to the java executable
-	javaExecPath := filepath.Join(homeDir, ".hipo", "jre", jdkDir, "bin", "java")
+	javaExecPath, found := findJava(jreParentDir)
+
+	if !found {
+		fmt.Println("Java file is not found")
+		return
+	}
+
+	if runtime.GOOS != "windows" {
+		err = os.Chmod(javaExecPath, 0755)
+		if err != nil {
+			fmt.Println("Error setting execute permission:", err)
+			return
+		}
+	}
 
 	cmd := exec.Command(javaExecPath, "-jar", jarFilePath)
 
@@ -140,30 +241,6 @@ func executeFile(jarFilePath string) {
 		return
 	}
 
-	//fmt.Println("Java application ran successfully")
-}
-
-func InitHipo() {
-	hipoHome, done := PrepareHipoHome()
-
-	if !done {
-		return
-	}
-
-	mostRecentJavaRelease, done := GetLatestJavaRelease()
-
-	if !done {
-		return
-	}
-
-	var arch = ArchitecturesMap[runtime.GOARCH]
-	var osName = runtime.GOOS
-
-	done = DownloadJava(mostRecentJavaRelease, osName, arch, hipoHome)
-
-	if !done {
-		return
-	}
 }
 
 func PrepareHipoHome() (string, bool) {
@@ -176,12 +253,6 @@ func PrepareHipoHome() (string, bool) {
 	}
 
 	var hipoHomeDir = homeDir + "/.hipo"
-
-	// Check if the directory already exists
-	if _, err := os.Stat(hipoHomeDir); !os.IsNotExist(err) {
-		// fmt.Println("Directory already exists:", hipoHomeDir)
-		return "", false
-	}
 
 	err = os.MkdirAll(hipoHomeDir, 0755)
 
@@ -205,7 +276,6 @@ func DownloadJava(release uint, osName string, arch string, hipoHome string) boo
 	}
 	defer resp.Body.Close()
 
-	// Check if the HTTP response status is OK
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("Error: HTTP request failed with status code %d\n", resp.StatusCode)
 		return false
@@ -213,53 +283,80 @@ func DownloadJava(release uint, osName string, arch string, hipoHome string) boo
 
 	var hipoJreDir = hipoHome + "/jre"
 
+	//creates the destination directory
 	err = os.MkdirAll(hipoJreDir, 0755)
 	if err != nil {
 		fmt.Println("Error: failed to create directory:", err)
 		return false
 	}
 
-	// Create a temporary file to store the downloaded Java runtime
-	tmpFile, err := os.CreateTemp("", "jre-*.zip")
-	if err != nil {
-		fmt.Println("Error: failed to create temporary file:", err)
-		return false
-	}
-	defer os.Remove(tmpFile.Name()) // Clean up the temporary file
-	defer tmpFile.Close()
-
-	_, err = io.Copy(tmpFile, resp.Body) // Save binary to temporary file
-	if err != nil {
-		fmt.Println("Error: failed to copy response body to file:", err)
-		return false
-	}
-
-	// Seek to the beginning of the temporary file to read it
-	if _, err := tmpFile.Seek(0, 0); err != nil {
-		fmt.Println("Error: failed to seek to beginning of file:", err)
-		return false
-	}
-
-	// Extract the zip file contents to the destination directory
-	if err := ExtractZip(tmpFile.Name(), hipoHome+"/jre"); err != nil {
-		fmt.Println("Error extracting ZIP file:", err)
-		return false
+	if osName == "windows" {
+		// Extract the zip file contents to the destination directory
+		if err := ExtractZip(resp.Body, hipoHome+"/jre"); err != nil {
+			fmt.Println("Error extracting ZIP file:", err)
+			return false
+		}
+	} else {
+		// Extract the tar file contents to the destination directory
+		if err := ExtractTarGz(resp.Body, hipoHome+"/jre"); err != nil {
+			fmt.Println("Error extracting TarGz file:", err)
+			return false
+		}
 	}
 
 	return true
 }
 
-func ExtractZip(src, destination string) error {
-	r, err := zip.OpenReader(src)
+func GetLatestJavaRelease() (uint, bool) {
+
+	resp, err := http.Get("https://api.adoptium.net/v3/info/available_releases")
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		return 0, false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		return 0, false
+	}
+
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Println("Error:", err)
+		}
+	}(resp.Body)
+
+	var response AvailableReleaseResponse
+
+	err = json.Unmarshal(body, &response)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		return 0, false
+	}
+
+	return response.MostRecentFeatureRelease, true
+}
+
+func ExtractZip(reader io.Reader, destination string) error {
+
+	content, err := io.ReadAll(reader)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+
+	r, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return err
+	}
 
 	for _, f := range r.File {
 		fpath := filepath.Join(destination, f.Name)
 
-		// For ZipSlip error
 		if !strings.HasPrefix(fpath, filepath.Clean(destination)+string(os.PathSeparator)) {
 			return fmt.Errorf("%s: illegal file path", fpath)
 		}
@@ -295,36 +392,54 @@ func ExtractZip(src, destination string) error {
 	return nil
 }
 
-func GetLatestJavaRelease() (uint, bool) {
-	resp, err := http.Get("https://api.adoptium.net/v3/info/available_releases")
+func ExtractTarGz(reader io.Reader, destination string) error {
 
+	gzipReader, err := gzip.NewReader(reader)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return 0, false
+		return err
 	}
+	defer gzipReader.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	tarReader := tar.NewReader(gzipReader)
 
-	if err != nil {
-		fmt.Println("Error:", err)
-		return 0, false
-	}
-
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			fmt.Println("Error:", err)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
 		}
-	}(resp.Body)
+		if err != nil {
+			return err
+		}
 
-	var response AvailableReleaseResponse
+		fpath := filepath.Join(destination, header.Name)
 
-	err = json.Unmarshal(body, &response)
+		if !strings.HasPrefix(fpath, filepath.Clean(destination)+string(os.PathSeparator)) {
+			return fmt.Errorf("%s: illegal file path", fpath)
+		}
 
-	if err != nil {
-		fmt.Println("Error:", err)
-		return 0, false
+		if header.Typeflag == tar.TypeDir {
+			if err := os.MkdirAll(fpath, os.FileMode(header.Mode)); err != nil {
+				return err
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+				return err
+			}
+
+			outFile, err := os.Create(fpath)
+			if err != nil {
+				return err
+			}
+
+			if _, err := io.Copy(outFile, tarReader); err != nil {
+				outFile.Close()
+				return err
+			}
+
+			outFile.Close()
+		}
+
 	}
 
-	return response.MostRecentFeatureRelease, true
+	return nil
 }
