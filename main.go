@@ -36,10 +36,16 @@ func main() {
 	}
 
 	if len(os.Args) == 1 {
+
 		fmt.Printf("Usage:\nhipo group:artifact:version\n")
+
 	} else if len(os.Args) == 2 {
-		destPath := downloadFile(os.Args[1])
-		executeFile(destPath)
+
+		destPath, done := downloadFile(os.Args[1])
+
+		if done {
+			executeFile(destPath)
+		}
 	}
 
 }
@@ -133,12 +139,12 @@ func InitHipo() {
 	}
 }
 
-func downloadFile(Args string) string {
+func downloadFile(Args string) (string, bool) {
 
 	parts := strings.Split(Args, ":")
-	if len(parts) != 3 {
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		fmt.Println("Invalid coordinate format. Use <group:artifact:version>")
-		return ""
+		return "", false
 	}
 
 	// goes to link
@@ -154,25 +160,25 @@ func downloadFile(Args string) string {
 
 	if err != nil {
 		fmt.Println("Error:", err)
-		return ""
+		return "", false
 	}
 
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("failed to make GET request: %v", err)
-		return ""
+		return "", false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("failed to download file: status code %d", resp.StatusCode)
-		return ""
+		fmt.Printf("Package not found in maven repository\n")
+		return "", false
 	}
 
-	destDir := filepath.Join(homeDir, ".hipo", groupPath, artifactID, version)
+	destDir := filepath.Join(homeDir, ".hipo", "cache", groupPath, artifactID, version)
 
 	//copies the downloaded content into the new file in the destDir
-	return copyFile(destDir, artifactFilename, resp.Body)
+	return copyFile(destDir, artifactFilename, resp.Body), true
 
 }
 
