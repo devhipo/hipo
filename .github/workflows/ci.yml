@@ -1,0 +1,170 @@
+name: Go CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+
+    - name: Install dependencies
+      run: go mod tidy
+
+    - name: Install golint
+      run: go install golang.org/x/lint/golint@latest
+    
+    - name: Run go fmt
+      run: go fmt ./...
+
+    - name: Lint code
+      run: golint ./...
+
+    - name: Run tests
+      run: go test ./...
+
+  build:
+    runs-on: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+
+    - name: Install dependencies
+      run: go mod tidy
+
+    - name: Build binary (Linux and macOS)
+      if: runner.os != 'Windows'
+      run: go build -o hipo
+
+    - name: Build binary (Windows)
+      if: runner.os == 'Windows'
+      run: go build -o hipo.exe
+
+    - name: Upload Build Artifact (Linux and macOS)
+      if: runner.os != 'Windows'
+      uses: actions/upload-artifact@v2
+      with:
+        name: hipo-${{ matrix.os }}
+        path: ./hipo
+
+    - name: Upload Build Artifact (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v2
+      with:
+        name: hipo-windows
+        path: ./hipo.exe
+
+  release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+
+    - name: Install dependencies
+      run: go mod tidy
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+    - name: Download Build Artifacts (Linux)
+      uses: actions/download-artifact@v2
+      with:
+        name: hipo-ubuntu-latest
+        path: ./hipo-ubuntu
+
+    - name: Download Build Artifacts (Windows)
+      uses: actions/download-artifact@v2
+      with:
+        name: hipo-windows
+        path: ./hipo-windows
+
+    - name: Download Build Artifacts (macOS)
+      uses: actions/download-artifact@v2
+      with:
+        name: hipo-macos-latest
+        path: ./hipo-macos
+
+    - name: List downloaded files (Linux)
+      if: runner.os == 'Linux'
+      run: ls -al ./hipo-ubuntu
+
+    - name: List downloaded files (Windows)
+      if: runner.os == 'Windows'
+      run: dir ./hipo-windows
+
+    - name: List downloaded files (macOS)
+      if: runner.os == 'macOS'
+      run: ls -al ./hipo-macos
+
+    - name: Upload Release Asset (Linux)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./hipo-ubuntu/hipo
+        asset_name: hipo-ubuntu-${{ github.ref }}
+        asset_content_type: application/octet-stream
+
+    - name: Upload Release Asset (Windows)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./hipo-windows/hipo.exe
+        asset_name: hipo-windows-${{ github.ref }}
+        asset_content_type: application/octet-stream
+
+    - name: Upload Release Asset (macOS)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./hipo-macos/hipo
+        asset_name: hipo-macos-${{ github.ref }}
+        asset_content_type: application/octet-stream
