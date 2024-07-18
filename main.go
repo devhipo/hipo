@@ -297,7 +297,7 @@ func prepareHipoHome() (string, bool) {
 
 	err = os.MkdirAll(hipoHomeDir, 0755)
 
-	if err != nil {
+	if err != nil && !os.IsExist(err) {
 		fmt.Println("Error:", err)
 		return "", false
 	}
