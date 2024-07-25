@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,13 @@ var ArchitecturesMap = map[string]string{
 	"amd64": "x64",
 }
 
+type Metadata struct {
+	XMLName    xml.Name `xml:"metadata"`
+	Versioning struct {
+		Release string `xml:"release"`
+	} `xml:"versioning"`
+}
+
 type AvailableReleaseResponse struct {
 	AvailableLtsReleases     []uint `json:"available_lts_releases"`
 	AvailableReleases        []uint `json:"available_releases"`
@@ -32,7 +40,7 @@ type AvailableReleaseResponse struct {
 func main() {
 
 	if !isHipoExists() {
-		InitHipo()
+		initHipo()
 	}
 
 	if len(os.Args) == 1 {
@@ -74,6 +82,7 @@ func isHipoExists() bool {
 func findJava(javaDir string) (string, bool) {
 
 	entries, err := os.ReadDir(javaDir)
+
 	if err != nil {
 		fmt.Println("Error reading jre directory:", err)
 		os.Exit(1)
@@ -115,15 +124,15 @@ func findJava(javaDir string) (string, bool) {
 	return "", false
 }
 
-func InitHipo() {
+func initHipo() {
 
-	hipoHome, done := PrepareHipoHome()
+	hipoHome, done := prepareHipoHome()
 
 	if !done {
 		os.Exit(1)
 	}
 
-	mostRecentJavaRelease, done := GetLatestJavaRelease()
+	mostRecentJavaRelease, done := getLatestJavaRelease()
 
 	if !done {
 		os.Exit(1)
@@ -132,7 +141,7 @@ func InitHipo() {
 	var arch = ArchitecturesMap[runtime.GOARCH]
 	var osName = runtime.GOOS
 
-	done = DownloadJava(mostRecentJavaRelease, osName, arch, hipoHome)
+	done = downloadJava(mostRecentJavaRelease, osName, arch, hipoHome)
 
 	if !done {
 		os.Exit(1)
@@ -142,17 +151,24 @@ func InitHipo() {
 func downloadFile(Args string) (string, bool) {
 
 	parts := strings.Split(Args, ":")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		fmt.Println("Invalid coordinate format. Use <group:artifact:version>")
+
+	if (len(parts) != 3 && len(parts) != 2) || parts[0] == "" || parts[1] == "" {
+		fmt.Println("Invalid coordinate format. Use <group:artifact:version> or <group:artifact>")
 		return "", false
 	}
 
-	// goes to link
 	groupID := parts[0]
 	artifactID := parts[1]
-	version := parts[2]
-
 	groupPath := strings.ReplaceAll(groupID, ".", "/")
+
+	var version string
+
+	if len(parts) == 2 {
+		version = findLatestVersion(groupPath, artifactID)
+	} else {
+		version = parts[2]
+	}
+
 	artifactFilename := fmt.Sprintf("%s-%s.jar", artifactID, version)
 	url := fmt.Sprintf("https://repo1.maven.org/maven2/%s/%s/%s/%s", groupPath, artifactID, version, artifactFilename)
 
@@ -164,10 +180,12 @@ func downloadFile(Args string) (string, bool) {
 	}
 
 	resp, err := http.Get(url)
+
 	if err != nil {
 		fmt.Printf("failed to make GET request: %v", err)
 		return "", false
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -185,6 +203,7 @@ func downloadFile(Args string) (string, bool) {
 func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) string {
 
 	err := os.MkdirAll(destDir, 0755)
+
 	if err != nil {
 		fmt.Printf("Error creating directory: %v\n", err)
 		return ""
@@ -193,19 +212,48 @@ func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) s
 	destPath := filepath.Join(destDir, artifactFilename)
 
 	out, err := os.Create(destPath)
+
 	if err != nil {
 		fmt.Printf("failed to create file: %v", err)
 		return ""
 	}
+
 	defer out.Close()
 
 	_, err = io.Copy(out, respBody)
+
 	if err != nil {
 		fmt.Printf("failed to copy response body to file: %v", err)
 		return ""
 	}
 
 	return destPath
+}
+
+func findLatestVersion(groupPath string, artifactID string) string {
+
+	url := fmt.Sprintf("https://repo1.maven.org/maven2/%s/%s/maven-metadata.xml", groupPath, artifactID)
+
+	response, err := http.Get(url)
+	if err != nil {
+		return ""
+	}
+
+	defer response.Body.Close()
+
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		return ""
+	}
+
+	var metadata Metadata
+
+	err = xml.Unmarshal(data, &metadata)
+	if err != nil {
+		return ""
+	}
+
+	return metadata.Versioning.Release
 }
 
 func executeFile(jarFilePath string) {
@@ -249,7 +297,7 @@ func executeFile(jarFilePath string) {
 
 }
 
-func PrepareHipoHome() (string, bool) {
+func prepareHipoHome() (string, bool) {
 
 	homeDir, err := os.UserHomeDir()
 
@@ -262,7 +310,7 @@ func PrepareHipoHome() (string, bool) {
 
 	err = os.MkdirAll(hipoHomeDir, 0755)
 
-	if err != nil {
+	if err != nil && !os.IsExist(err) {
 		fmt.Println("Error:", err)
 		return "", false
 	}
@@ -270,16 +318,18 @@ func PrepareHipoHome() (string, bool) {
 	return hipoHomeDir, true
 }
 
-func DownloadJava(release uint, osName string, arch string, hipoHome string) bool {
+func downloadJava(release uint, osName string, arch string, hipoHome string) bool {
 
 	url := fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%d/ga/%s/%s/jre/hotspot/normal/eclipse?project=jdk",
 		release, osName, arch)
 
 	resp, err := http.Get(url)
+
 	if err != nil {
 		fmt.Println("Error: failed to make GET request:", err)
 		return false
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -291,6 +341,7 @@ func DownloadJava(release uint, osName string, arch string, hipoHome string) boo
 
 	//creates the destination directory
 	err = os.MkdirAll(hipoJreDir, 0755)
+
 	if err != nil {
 		fmt.Println("Error: failed to create directory:", err)
 		return false
@@ -298,13 +349,13 @@ func DownloadJava(release uint, osName string, arch string, hipoHome string) boo
 
 	if osName == "windows" {
 		// Extract the zip file contents to the destination directory
-		if err := ExtractZip(resp.Body, hipoHome+"/jre"); err != nil {
+		if err := extractZip(resp.Body, hipoHome+"/jre"); err != nil {
 			fmt.Println("Error extracting ZIP file:", err)
 			return false
 		}
 	} else {
 		// Extract the tar file contents to the destination directory
-		if err := ExtractTarGz(resp.Body, hipoHome+"/jre"); err != nil {
+		if err := extractTarGz(resp.Body, hipoHome+"/jre"); err != nil {
 			fmt.Println("Error extracting TarGz file:", err)
 			return false
 		}
@@ -313,7 +364,7 @@ func DownloadJava(release uint, osName string, arch string, hipoHome string) boo
 	return true
 }
 
-func GetLatestJavaRelease() (uint, bool) {
+func getLatestJavaRelease() (uint, bool) {
 
 	resp, err := http.Get("https://api.adoptium.net/v3/info/available_releases")
 
@@ -348,7 +399,7 @@ func GetLatestJavaRelease() (uint, bool) {
 	return response.MostRecentFeatureRelease, true
 }
 
-func ExtractZip(reader io.Reader, destination string) error {
+func extractZip(reader io.Reader, destination string) error {
 
 	content, err := io.ReadAll(reader)
 	if err != nil {
@@ -361,6 +412,7 @@ func ExtractZip(reader io.Reader, destination string) error {
 	}
 
 	for _, f := range r.File {
+
 		fpath := filepath.Join(destination, f.Name)
 
 		if !strings.HasPrefix(fpath, filepath.Clean(destination)+string(os.PathSeparator)) {
@@ -394,21 +446,26 @@ func ExtractZip(reader io.Reader, destination string) error {
 		if err != nil {
 			return err
 		}
+
 	}
+
 	return nil
 }
 
-func ExtractTarGz(reader io.Reader, destination string) error {
+func extractTarGz(reader io.Reader, destination string) error {
 
 	gzipReader, err := gzip.NewReader(reader)
+
 	if err != nil {
 		return err
 	}
+
 	defer gzipReader.Close()
 
 	tarReader := tar.NewReader(gzipReader)
 
 	for {
+
 		header, err := tarReader.Next()
 		if err == io.EOF {
 			break
