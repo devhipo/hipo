@@ -24,7 +24,7 @@ var ArchitecturesMap = map[string]string{
 type Metadata struct {
 	XMLName    xml.Name `xml:"metadata"`
 	Versioning struct {
-		Latest string `xml:"latest"`
+		Release string `xml:"release"`
 	} `xml:"versioning"`
 }
 
@@ -82,6 +82,7 @@ func isHipoExists() bool {
 func findJava(javaDir string) (string, bool) {
 
 	entries, err := os.ReadDir(javaDir)
+
 	if err != nil {
 		fmt.Println("Error reading jre directory:", err)
 		os.Exit(1)
@@ -150,6 +151,7 @@ func initHipo() {
 func downloadFile(Args string) (string, bool) {
 
 	parts := strings.Split(Args, ":")
+
 	if (len(parts) != 3 && len(parts) != 2) || parts[0] == "" || parts[1] == "" {
 		fmt.Println("Invalid coordinate format. Use <group:artifact:version> or <group:artifact>")
 		return "", false
@@ -160,6 +162,7 @@ func downloadFile(Args string) (string, bool) {
 	groupPath := strings.ReplaceAll(groupID, ".", "/")
 
 	var version string
+
 	if len(parts) == 2 {
 		version = findLatestVersion(groupPath, artifactID)
 	} else {
@@ -177,10 +180,12 @@ func downloadFile(Args string) (string, bool) {
 	}
 
 	resp, err := http.Get(url)
+
 	if err != nil {
 		fmt.Printf("failed to make GET request: %v", err)
 		return "", false
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -198,6 +203,7 @@ func downloadFile(Args string) (string, bool) {
 func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) string {
 
 	err := os.MkdirAll(destDir, 0755)
+
 	if err != nil {
 		fmt.Printf("Error creating directory: %v\n", err)
 		return ""
@@ -206,13 +212,16 @@ func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) s
 	destPath := filepath.Join(destDir, artifactFilename)
 
 	out, err := os.Create(destPath)
+
 	if err != nil {
 		fmt.Printf("failed to create file: %v", err)
 		return ""
 	}
+
 	defer out.Close()
 
 	_, err = io.Copy(out, respBody)
+
 	if err != nil {
 		fmt.Printf("failed to copy response body to file: %v", err)
 		return ""
@@ -221,12 +230,15 @@ func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) s
 	return destPath
 }
 
-func findLatestVersion(groupPath, artifactID string) string {
+func findLatestVersion(groupPath string, artifactID string) string {
+
 	url := fmt.Sprintf("https://repo1.maven.org/maven2/%s/%s/maven-metadata.xml", groupPath, artifactID)
+
 	response, err := http.Get(url)
 	if err != nil {
 		return ""
 	}
+
 	defer response.Body.Close()
 
 	data, err := io.ReadAll(response.Body)
@@ -235,12 +247,13 @@ func findLatestVersion(groupPath, artifactID string) string {
 	}
 
 	var metadata Metadata
+
 	err = xml.Unmarshal(data, &metadata)
 	if err != nil {
 		return ""
 	}
 
-	return metadata.Versioning.Latest
+	return metadata.Versioning.Release
 }
 
 func executeFile(jarFilePath string) {
@@ -311,10 +324,12 @@ func downloadJava(release uint, osName string, arch string, hipoHome string) boo
 		release, osName, arch)
 
 	resp, err := http.Get(url)
+
 	if err != nil {
 		fmt.Println("Error: failed to make GET request:", err)
 		return false
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -326,6 +341,7 @@ func downloadJava(release uint, osName string, arch string, hipoHome string) boo
 
 	//creates the destination directory
 	err = os.MkdirAll(hipoJreDir, 0755)
+
 	if err != nil {
 		fmt.Println("Error: failed to create directory:", err)
 		return false
@@ -396,6 +412,7 @@ func extractZip(reader io.Reader, destination string) error {
 	}
 
 	for _, f := range r.File {
+
 		fpath := filepath.Join(destination, f.Name)
 
 		if !strings.HasPrefix(fpath, filepath.Clean(destination)+string(os.PathSeparator)) {
@@ -429,21 +446,26 @@ func extractZip(reader io.Reader, destination string) error {
 		if err != nil {
 			return err
 		}
+
 	}
+
 	return nil
 }
 
 func extractTarGz(reader io.Reader, destination string) error {
 
 	gzipReader, err := gzip.NewReader(reader)
+
 	if err != nil {
 		return err
 	}
+
 	defer gzipReader.Close()
 
 	tarReader := tar.NewReader(gzipReader)
 
 	for {
+
 		header, err := tarReader.Next()
 		if err == io.EOF {
 			break
