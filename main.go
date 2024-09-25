@@ -45,14 +45,14 @@ func main() {
 
 	if len(os.Args) == 1 {
 
-		fmt.Printf("Usage:\nhipo group:artifact:version\n")
+		fmt.Printf("Usage:\nhipo group:artifact:version (or group:artifact) and arguments\n")
 
-	} else if len(os.Args) == 2 {
+	} else {
 
 		destPath, done := downloadFile(os.Args[1])
 
 		if done {
-			executeFile(destPath)
+			executeFile(destPath, os.Args...)
 		}
 	}
 
@@ -256,7 +256,7 @@ func findLatestVersion(groupPath string, artifactID string) string {
 	return metadata.Versioning.Release
 }
 
-func executeFile(jarFilePath string) {
+func executeFile(jarFilePath string, args ...string) {
 
 	homeDir, err := os.UserHomeDir()
 
@@ -283,7 +283,9 @@ func executeFile(jarFilePath string) {
 		}
 	}
 
-	cmd := exec.Command(javaExecPath, "-jar", jarFilePath)
+	cmdArgs := append([]string{"-jar", jarFilePath}, args...)
+
+	cmd := exec.Command(javaExecPath, cmdArgs...)
 
 	// Set the command's standard output and standard error
 	cmd.Stdout = os.Stdout
