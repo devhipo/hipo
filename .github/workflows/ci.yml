@@ -75,14 +75,14 @@ jobs:
 
     - name: Upload Build Artifact (Linux and macOS)
       if: runner.os != 'Windows'
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: hipo-${{ matrix.os }}-${{ matrix.arch }}
         path: ./hipo
 
     - name: Upload Build Artifact (Windows)
       if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: hipo-windows-${{ matrix.arch }}
         path: ./hipo.exe
