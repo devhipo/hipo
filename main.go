@@ -19,6 +19,11 @@ import (
 
 var ArchitecturesMap = map[string]string{
   "amd64": "x64",
+  "arm64": "aarch64",
+}
+
+var OperatingSystemsMap = map[string]string{
+  "darwin": "mac",
 }
 
 type Metadata struct {
@@ -43,18 +48,14 @@ func main() {
   }
 
   if len(os.Args) == 1 {
-
     fmt.Printf("Usage:\nhipo group:artifact:version (or group:artifact) and arguments\n")
-
   } else {
-
     destPath, done := downloadFile(os.Args[1])
 
     if done {
       executeFile(destPath, os.Args...)
     }
   }
-
 }
 
 func doesHipoExist() bool {
@@ -84,7 +85,7 @@ func findJava(javaDir string) (string, bool) {
     os.Exit(1)
   }
 
-  //checks all files in the parent jre directory to find bin directory
+  // Checks all files in the parent jre directory to find bin directory
   for _, entry := range entries {
     if entry.IsDir() {
 
@@ -101,7 +102,7 @@ func findJava(javaDir string) (string, bool) {
         os.Exit(1)
       }
 
-      //checks all files in the bin directory to find java executable
+      // Checks all files in the bin directory to find java executable
       for _, binEntry := range binEntries {
 
         fileName := filepath.Join(binDir, binEntry.Name())
@@ -132,7 +133,16 @@ func initHipo() {
   }
 
   var arch = ArchitecturesMap[runtime.GOARCH]
-  var osName = runtime.GOOS
+
+  if arch == "" {
+    arch = runtime.GOARCH
+  }
+
+  var osName = OperatingSystemsMap[runtime.GOOS]
+
+  if osName == "" {
+    osName = runtime.GOOS
+  }
 
   done = downloadJava(mostRecentJavaRelease, osName, arch, hipoHome)
 
@@ -187,7 +197,7 @@ func downloadFile(Args string) (string, bool) {
 
   destDir := filepath.Join(homeDir, ".hipo", "cache", groupPath, artifactID, version)
 
-  //copies the downloaded content into the new file in the destDir
+  // Copies the downloaded content into the new file in the destDir
   return copyFile(destDir, artifactFilename, resp.Body), true
 }
 
@@ -200,7 +210,6 @@ func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) s
   }
 
   destPath := filepath.Join(destDir, artifactFilename)
-
   out, err := os.Create(destPath)
 
   if err != nil {
@@ -209,7 +218,6 @@ func copyFile(destDir string, artifactFilename string, respBody io.ReadCloser) s
   }
 
   defer out.Close()
-
   _, err = io.Copy(out, respBody)
 
   if err != nil {
@@ -265,6 +273,7 @@ func executeFile(jarFilePath string, args ...string) {
 
   if runtime.GOOS != "windows" {
     err = os.Chmod(javaExecPath, 0755)
+
     if err != nil {
       fmt.Println("Error setting execute permission:", err)
       return
@@ -272,7 +281,6 @@ func executeFile(jarFilePath string, args ...string) {
   }
 
   cmdArgs := append([]string{"-jar", jarFilePath}, args...)
-
   cmd := exec.Command(javaExecPath, cmdArgs...)
 
   // Set the command's standard output and standard error
@@ -308,7 +316,6 @@ func prepareHipoHome() (string, bool) {
 }
 
 func downloadJava(release uint, osName string, arch string, hipoHome string) bool {
-
   url := fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%d/ga/%s/%s/jre/hotspot/normal/eclipse?project=jdk",
     release, osName, arch)
 
@@ -328,7 +335,7 @@ func downloadJava(release uint, osName string, arch string, hipoHome string) boo
 
   var hipoJreDir = hipoHome + "/jre"
 
-  //creates the destination directory
+  // Creates the destination directory
   err = os.MkdirAll(hipoJreDir, 0755)
 
   if err != nil {
@@ -354,7 +361,6 @@ func downloadJava(release uint, osName string, arch string, hipoHome string) boo
 }
 
 func getLatestJavaRelease() (uint, bool) {
-
   resp, err := http.Get("https://api.adoptium.net/v3/info/available_releases")
 
   if err != nil {
@@ -389,19 +395,19 @@ func getLatestJavaRelease() (uint, bool) {
 }
 
 func extractZip(reader io.Reader, destination string) error {
-
   content, err := io.ReadAll(reader)
+
   if err != nil {
     return err
   }
 
   r, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+
   if err != nil {
     return err
   }
 
   for _, f := range r.File {
-
     fpath := filepath.Join(destination, f.Name)
 
     if !strings.HasPrefix(fpath, filepath.Clean(destination)+string(os.PathSeparator)) {
@@ -418,11 +424,13 @@ func extractZip(reader io.Reader, destination string) error {
     }
 
     outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+
     if err != nil {
       return err
     }
 
     rc, err := f.Open()
+
     if err != nil {
       outFile.Close()
       return err
@@ -432,17 +440,16 @@ func extractZip(reader io.Reader, destination string) error {
 
     rc.Close()
     outFile.Close()
+
     if err != nil {
       return err
     }
-
   }
 
   return nil
 }
 
 func extractTarGz(reader io.Reader, destination string) error {
-
   gzipReader, err := gzip.NewReader(reader)
 
   if err != nil {
@@ -454,11 +461,12 @@ func extractTarGz(reader io.Reader, destination string) error {
   tarReader := tar.NewReader(gzipReader)
 
   for {
-
     header, err := tarReader.Next()
+
     if err == io.EOF {
       break
     }
+
     if err != nil {
       return err
     }
@@ -479,6 +487,7 @@ func extractTarGz(reader io.Reader, destination string) error {
       }
 
       outFile, err := os.Create(fpath)
+
       if err != nil {
         return err
       }
@@ -490,7 +499,6 @@ func extractTarGz(reader io.Reader, destination string) error {
 
       outFile.Close()
     }
-
   }
 
   return nil
