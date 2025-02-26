@@ -116,25 +116,25 @@ jobs:
         prerelease: false
 
     - name: Download Build Artifacts (Linux)
-      uses: actions/download-artifact@v4.1.8
+      uses: actions/download-artifact@v4.1.9
       with:
         name: hipo-ubuntu-latest-x64
         path: ./hipo-ubuntu-x64
 
     - name: Download Build Artifacts (Windows)
-      uses: actions/download-artifact@v4.1.8
+      uses: actions/download-artifact@v4.1.9
       with:
         name: hipo-windows-x64
         path: ./hipo-windows-x64
 
     - name: Download Build Artifacts (macOS x64)
-      uses: actions/download-artifact@v4.1.8
+      uses: actions/download-artifact@v4.1.9
       with:
         name: hipo-macos-latest-x64
         path: ./hipo-macos-x64
 
     - name: Download Build Artifacts (macOS arm64)
-      uses: actions/download-artifact@v4.1.8
+      uses: actions/download-artifact@v4.1.9
       with:
         name: hipo-macos-latest-arm64
         path: ./hipo-macos-arm64
