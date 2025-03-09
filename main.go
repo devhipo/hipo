@@ -87,9 +87,14 @@ func findJava(javaDir string) (string, bool) {
 
   // Checks all files in the parent jre directory to find bin directory
   for _, entry := range entries {
+
     if entry.IsDir() {
 
       binDir := filepath.Join(javaDir, entry.Name(), "bin")
+
+      if runtime.GOOS == "darwin" {
+        binDir = filepath.Join(javaDir, entry.Name(), "Contents", "Home", "bin")
+      }
 
       if _, err := os.Stat(binDir); os.IsNotExist(err) {
         continue
